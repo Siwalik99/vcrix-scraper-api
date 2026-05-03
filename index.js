@@ -52,8 +52,11 @@ async function scrapeVCRIX() {
       timeout: 30000
     });
 
-    // Attendre que Highcharts rende les données
-    await new Promise(r => setTimeout(r, 3000));
+    // Attendre que Highcharts rende les données (max 20s)
+    await page.waitForFunction(
+      () => window.Highcharts?.charts?.some(c => c && c.series?.[0]?.data?.length > 0),
+      { timeout: 20000 }
+    ).catch(() => console.warn('[VCRIX] Highcharts not ready, trying anyway'));
 
     const result = await page.evaluate(() => {
       // Méthode 1 : API Highcharts directe
@@ -96,7 +99,6 @@ async function scrapeVCRIX() {
 
   } catch (err) {
     console.error('[VCRIX] Puppeteer error:', err.message);
-    // Graceful degradation — ne bloque jamais l'orchestrateur
     return { success: false, value: null, mean: MEAN_FALLBACK, std: STD_FALLBACK, signal: 'NEUTRAL', source: 'none', error: err.message };
   } finally {
     if (browser) await browser.close();
