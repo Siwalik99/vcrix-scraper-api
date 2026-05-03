@@ -34,29 +34,6 @@ async function scrapeVCRIX() {
 
     const page = await browser.newPage();
 
-    let capturedData = null;
-    const interceptedUrls = [];
-
-    page.on('response', async (response) => {
-      const url = response.url();
-      interceptedUrls.push(url);
-      try {
-        const ct = response.headers()['content-type'] || '';
-        if (ct.includes('json')) {
-          const json = await response.json();
-          const arr = Array.isArray(json) ? json : (json.data || json.series || json.values);
-          if (Array.isArray(arr) && arr.length > 0) {
-            const last = arr[arr.length - 1];
-            const val = Array.isArray(last) ? last[1] : (last.y || last.value || last.close);
-            if (val && val > 50 && val < 5000) {
-              capturedData = val;
-              console.log(`[VCRIX] Intercepted JSON: value=${val} from ${url}`);
-            }
-          }
-        }
-      } catch (e) { /* ignore */ }
-    });
-
     await page.setRequestInterception(true);
     page.on('request', (req) => {
       if (['image', 'font', 'media'].includes(req.resourceType())) {
@@ -72,31 +49,23 @@ async function scrapeVCRIX() {
     });
 
     const html = await page.content();
-    console.log('[VCRIX DEBUG] HTML length:', html.length);
-    console.log('[VCRIX DEBUG] HTML sample:', html.substring(0, 3000));
-    const dataMatches = html.match(/\d{3,4}\.\d{1,4}/g);
-    console.log('[VCRIX DEBUG] Numeric patterns:', dataMatches?.slice(0, 30));
-    const seriesMatches = html.match(/series\s*[:=][^;]{0,300}/g);
-    console.log('[VCRIX DEBUG] Series patterns:', seriesMatches?.slice(0, 3));
-    console.log('[VCRIX DEBUG] Intercepted URLs:', interceptedUrls.join('\n'));
 
+    // Extraire le dernier point [timestamp, value] de la première série inline
+    const seriesMatch = html.match(/series\s*:\s*\[{\s*data\s*:\s*\[([\s\S]*?)\]/);
+    let value = null;
+    if (seriesMatch) {
+      const pointMatches = [...seriesMatch[1].matchAll(/\[\d+,([\d.]+)\]/g)];
+      if (pointMatches.length > 0) {
+        value = parseFloat(pointMatches[pointMatches.length - 1][1]);
+        console.log(`[VCRIX] Extracted ${pointMatches.length} points, last value: ${value}`);
+      }
+    }
+
+    // Mean / Std
     const avgMatch = html.match(/<b>Mean:<\/b>\s*([\d,]+\.?\d*)/);
     const stdMatch = html.match(/<b>StD:<\/b>\s*([\d,]+\.?\d*)/);
     const mean = avgMatch ? parseFloat(avgMatch[1].replace(',', '')) : MEAN_FALLBACK;
     const std = stdMatch ? parseFloat(stdMatch[1].replace(',', '')) : STD_FALLBACK;
-
-    let value = capturedData;
-    if (!value) {
-      value = await page.evaluate(() => {
-        const labels = document.querySelectorAll('.highcharts-yaxis-labels text, .highcharts-data-label text');
-        const vals = [];
-        labels.forEach(el => {
-          const v = parseFloat(el.textContent.replace(/,/g, ''));
-          if (v > 50 && v < 5000) vals.push(v);
-        });
-        return vals.length > 0 ? vals[vals.length - 1] : null;
-      });
-    }
 
     const signal = computeSignal(value, mean, std);
     console.log(`[VCRIX] value=${value} mean=${mean} std=${std} signal=${signal}`);
