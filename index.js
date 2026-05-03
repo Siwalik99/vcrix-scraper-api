@@ -38,7 +38,6 @@ async function getPage() {
 }
 
 function extractValue(html) {
-  // Couper avant le treemap (qui contient aussi des données JSON parasites)
   const treemapIdx = html.indexOf("type: 'treemap'");
   const searchZone = treemapIdx > 0 ? html.slice(0, treemapIdx) : html;
 
@@ -68,7 +67,10 @@ async function scrapeVCRIX() {
     const signal = computeSignal(value, mean, std);
     console.log(`[VCRIX] value=${value} mean=${mean} std=${std} signal=${signal}`);
     const data = { success: true, value, mean, std, signal, source: 'royalton-crix.com', cached: false };
-    cache = { data, timestamp: Date.now() };
+    // ✅ FIX: ne pas cacher si value=null (scrape raté)
+    if (value !== null) {
+      cache = { data, timestamp: Date.now() };
+    }
     return data;
   } catch (err) {
     console.error('[VCRIX] Error:', err.message);
