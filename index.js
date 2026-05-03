@@ -33,15 +33,15 @@ async function scrapeVCRIX() {
 
     // Intercepter les réponses réseau pour capturer les données Highcharts
     let capturedData = null;
+    const interceptedUrls = [];
     page.on('response', async (response) => {
       const url = response.url();
-      // Chercher les appels JSON contenant des données de séries temporelles
+      interceptedUrls.push(url);
       if (url.includes('crix') || url.includes('data') || url.includes('json') || url.includes('chart')) {
         try {
           const ct = response.headers()['content-type'] || '';
           if (ct.includes('json')) {
             const json = await response.json();
-            // Chercher un tableau de valeurs numériques [timestamp, value]
             const arr = Array.isArray(json) ? json : (json.data || json.series || json.values);
             if (Array.isArray(arr) && arr.length > 0) {
               const last = arr[arr.length - 1];
@@ -56,7 +56,6 @@ async function scrapeVCRIX() {
       }
     });
 
-    // NE PAS bloquer CSS/JS — nécessaire pour que Highcharts charge ses données
     await page.setRequestInterception(true);
     page.on('request', (req) => {
       if (['image', 'font', 'media'].includes(req.resourceType())) {
@@ -71,19 +70,26 @@ async function scrapeVCRIX() {
       timeout: 35000
     });
 
-    // Extraire mean/std
+    // ── DEBUG BLOCK ──────────────────────────────────────────────────────────
     const html = await page.content();
+    console.log('[VCRIX DEBUG] HTML length:', html.length);
+    console.log('[VCRIX DEBUG] HTML sample (0-3000):', html.substring(0, 3000));
+    console.log('[VCRIX DEBUG] HTML sample (3000-6000):', html.substring(3000, 6000));
+    const dataMatches = html.match(/\d{3,4}\.\d{1,4}/g);
+    console.log('[VCRIX DEBUG] Numeric patterns (3-4 digits):', dataMatches?.slice(0, 30));
+    const scriptMatches = html.match(/series\s*[:=][^;]{0,300}/g);
+    console.log('[VCRIX DEBUG] Series patterns:', scriptMatches?.slice(0, 5));
+    console.log('[VCRIX DEBUG] All intercepted URLs:', interceptedUrls.join('\n'));
+    // ── END DEBUG ────────────────────────────────────────────────────────────
+
     const avgMatch = html.match(/<b>Mean:<\/b>\s*([\d,]+\.?\d*)/);
     const stdMatch = html.match(/<b>StD:<\/b>\s*([\d,]+\.?\d*)/);
     const mean = avgMatch ? parseFloat(avgMatch[1].replace(',', '')) : MEAN_FALLBACK;
     const std = stdMatch ? parseFloat(stdMatch[1].replace(',', '')) : STD_FALLBACK;
 
-    // Tentative SVG path en dernier recours
     let value = capturedData;
     if (!value) {
       value = await page.evaluate(() => {
-        // Lire les points SVG du graphique Highcharts
-        const points = document.querySelectorAll('.highcharts-series path, .highcharts-point');
         const labels = document.querySelectorAll('.highcharts-yaxis-labels text, .highcharts-data-label text');
         const vals = [];
         labels.forEach(el => {
