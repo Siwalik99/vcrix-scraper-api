@@ -1,5 +1,6 @@
 const express = require('express');
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core');
+const chromium = require('@sparticuz/chromium');
 
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -25,35 +26,35 @@ async function scrapeVCRIX() {
   let browser;
   try {
     browser = await puppeteer.launch({
-      headless: 'new',
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--single-process']
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
     });
 
     const page = await browser.newPage();
 
-    // Intercepter les réponses réseau pour capturer les données Highcharts
     let capturedData = null;
     const interceptedUrls = [];
+
     page.on('response', async (response) => {
       const url = response.url();
       interceptedUrls.push(url);
-      if (url.includes('crix') || url.includes('data') || url.includes('json') || url.includes('chart')) {
-        try {
-          const ct = response.headers()['content-type'] || '';
-          if (ct.includes('json')) {
-            const json = await response.json();
-            const arr = Array.isArray(json) ? json : (json.data || json.series || json.values);
-            if (Array.isArray(arr) && arr.length > 0) {
-              const last = arr[arr.length - 1];
-              const val = Array.isArray(last) ? last[1] : (last.y || last.value || last.close);
-              if (val && val > 50 && val < 5000) {
-                capturedData = val;
-                console.log(`[VCRIX] Intercepted JSON data: value=${val} from ${url}`);
-              }
+      try {
+        const ct = response.headers()['content-type'] || '';
+        if (ct.includes('json')) {
+          const json = await response.json();
+          const arr = Array.isArray(json) ? json : (json.data || json.series || json.values);
+          if (Array.isArray(arr) && arr.length > 0) {
+            const last = arr[arr.length - 1];
+            const val = Array.isArray(last) ? last[1] : (last.y || last.value || last.close);
+            if (val && val > 50 && val < 5000) {
+              capturedData = val;
+              console.log(`[VCRIX] Intercepted JSON: value=${val} from ${url}`);
             }
           }
-        } catch (e) { /* ignore */ }
-      }
+        }
+      } catch (e) { /* ignore */ }
     });
 
     await page.setRequestInterception(true);
@@ -70,17 +71,14 @@ async function scrapeVCRIX() {
       timeout: 35000
     });
 
-    // ── DEBUG BLOCK ──────────────────────────────────────────────────────────
     const html = await page.content();
     console.log('[VCRIX DEBUG] HTML length:', html.length);
-    console.log('[VCRIX DEBUG] HTML sample (0-3000):', html.substring(0, 3000));
-    console.log('[VCRIX DEBUG] HTML sample (3000-6000):', html.substring(3000, 6000));
+    console.log('[VCRIX DEBUG] HTML sample:', html.substring(0, 3000));
     const dataMatches = html.match(/\d{3,4}\.\d{1,4}/g);
-    console.log('[VCRIX DEBUG] Numeric patterns (3-4 digits):', dataMatches?.slice(0, 30));
-    const scriptMatches = html.match(/series\s*[:=][^;]{0,300}/g);
-    console.log('[VCRIX DEBUG] Series patterns:', scriptMatches?.slice(0, 5));
-    console.log('[VCRIX DEBUG] All intercepted URLs:', interceptedUrls.join('\n'));
-    // ── END DEBUG ────────────────────────────────────────────────────────────
+    console.log('[VCRIX DEBUG] Numeric patterns:', dataMatches?.slice(0, 30));
+    const seriesMatches = html.match(/series\s*[:=][^;]{0,300}/g);
+    console.log('[VCRIX DEBUG] Series patterns:', seriesMatches?.slice(0, 3));
+    console.log('[VCRIX DEBUG] Intercepted URLs:', interceptedUrls.join('\n'));
 
     const avgMatch = html.match(/<b>Mean:<\/b>\s*([\d,]+\.?\d*)/);
     const stdMatch = html.match(/<b>StD:<\/b>\s*([\d,]+\.?\d*)/);
