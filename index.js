@@ -31,7 +31,6 @@ async function getPage(waitUntil = 'networkidle0') {
     else req.continue();
   });
   await page.goto('https://www.royalton-crix.com/getvcrix', { waitUntil, timeout: 40000 });
-  // Attendre un peu plus pour que Highcharts ait le temps de rendre
   await new Promise(r => setTimeout(r, 3000));
   const html = await page.content();
   await browser.close();
@@ -39,24 +38,18 @@ async function getPage(waitUntil = 'networkidle0') {
 }
 
 function extractValue(html) {
-  // Chercher série Highcharts : data: [[timestamp13chiffres, valeur], ...]
-  const seriesBlock = html.match(/series\s*:\s*\[\{[\s\S]*?data\s*:\s*\[([\s\S]*?)\]\s*[,}]/);
-  if (seriesBlock) {
-    const points = [...seriesBlock[1].matchAll(/\[(\d{13}),([\d.]+)\]/g)];
-    if (points.length > 0) {
-      const val = parseFloat(points[points.length - 1][2]);
-      console.log(`[VCRIX] series block: ${points.length} points, last=${val}`);
-      return val;
-    }
-  }
-  // Fallback: tout timestamp13 + valeur VCRIX-plausible (100-3000)
-  const all = [...html.matchAll(/\[(\d{13}),([\d.]+)\]/g)];
-  const plausible = all.filter(m => { const v = parseFloat(m[2]); return v >= 100 && v <= 3000; });
-  if (plausible.length > 0) {
-    const val = parseFloat(plausible[plausible.length - 1][2]);
-    console.log(`[VCRIX] fallback: ${plausible.length} plausible points, last=${val}`);
+  // Cibler la zone après le titre "Royalton CRIX Index" pour éviter les autres séries
+  const crixIdx = html.indexOf('Royalton CRIX Index');
+  const searchZone = crixIdx >= 0 ? html.slice(crixIdx, crixIdx + 50000) : html;
+
+  const points = [...searchZone.matchAll(/\[(\d{13}),([\d.]+)\]/g)];
+  if (points.length > 0) {
+    const val = parseFloat(points[points.length - 1][2]);
+    console.log(`[VCRIX] Found ${points.length} points after title, last=${val}`);
     return val;
   }
+
+  console.warn('[VCRIX] No points found in HTML');
   return null;
 }
 
@@ -90,19 +83,17 @@ app.get('/vcrix', async (req, res) => {
   res.json(data);
 });
 
-// Endpoint debug — retourne les 3000 premiers caractères du HTML brut
 app.get('/debug', async (req, res) => {
   try {
     const html = await getPage('networkidle0');
-    // Chercher le mot "series" ou "VCRIX" et retourner un extrait autour
-    const idx = html.indexOf('series');
-    const excerpt = idx >= 0 ? html.slice(Math.max(0, idx - 100), idx + 500) : html.slice(0, 3000);
+    const idx = html.indexOf('Royalton CRIX Index');
+    const excerpt = idx >= 0 ? html.slice(idx, idx + 600) : html.slice(0, 3000);
     res.json({
       length: html.length,
       has_series: html.includes('series'),
-      has_data: html.includes('data:'),
       has_vcrix: html.toLowerCase().includes('vcrix'),
-      series_excerpt: excerpt,
+      crix_title_found: idx >= 0,
+      crix_excerpt: excerpt,
       timestamp_count: (html.match(/\d{13}/g) || []).length
     });
   } catch (err) {
