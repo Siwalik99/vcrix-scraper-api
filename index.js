@@ -50,18 +50,17 @@ async function scrapeVCRIX() {
 
     const html = await page.content();
 
-    // Extraire le dernier point [timestamp, value] de la première série inline
-    const seriesMatch = html.match(/series\s*:\s*\[{\s*data\s*:\s*\[([\s\S]*?)\]/);
+    // Les données sont inline : series: [{ data: [ [timestamp,value],... ] }]
+    // On extrait TOUS les points [timestamp, valeur_numerique] et on prend le dernier
+    const allPoints = [...html.matchAll(/\[1\d{12},([\d.]+)\]/g)];
     let value = null;
-    if (seriesMatch) {
-      const pointMatches = [...seriesMatch[1].matchAll(/\[\d+,([\d.]+)\]/g)];
-      if (pointMatches.length > 0) {
-        value = parseFloat(pointMatches[pointMatches.length - 1][1]);
-        console.log(`[VCRIX] Extracted ${pointMatches.length} points, last value: ${value}`);
-      }
+    if (allPoints.length > 0) {
+      value = parseFloat(allPoints[allPoints.length - 1][1]);
+      console.log(`[VCRIX] Found ${allPoints.length} points, last value: ${value}`);
+    } else {
+      console.warn('[VCRIX] No timestamp-value points found in HTML');
     }
 
-    // Mean / Std
     const avgMatch = html.match(/<b>Mean:<\/b>\s*([\d,]+\.?\d*)/);
     const stdMatch = html.match(/<b>StD:<\/b>\s*([\d,]+\.?\d*)/);
     const mean = avgMatch ? parseFloat(avgMatch[1].replace(',', '')) : MEAN_FALLBACK;
