@@ -50,15 +50,30 @@ async function scrapeVCRIX() {
 
     const html = await page.content();
 
-    // Les données sont inline : series: [{ data: [ [timestamp,value],... ] }]
-    // On extrait TOUS les points [timestamp, valeur_numerique] et on prend le dernier
-    const allPoints = [...html.matchAll(/\[1\d{12},([\d.]+)\]/g)];
+    // Extraire la première série [timestamp, value] — c'est le VCRIX
+    // On isole le bloc de la première série avant le treemap
     let value = null;
-    if (allPoints.length > 0) {
-      value = parseFloat(allPoints[allPoints.length - 1][1]);
-      console.log(`[VCRIX] Found ${allPoints.length} points, last value: ${value}`);
-    } else {
-      console.warn('[VCRIX] No timestamp-value points found in HTML');
+    const firstSeriesMatch = html.match(/series\s*:\s*\[\{[\s\S]*?data\s*:\s*\[([\s\S]*?)\]\s*\}/);
+    if (firstSeriesMatch) {
+      const points = [...firstSeriesMatch[1].matchAll(/\[(\d{13}),([\d.]+)\]/g)];
+      if (points.length > 0) {
+        value = parseFloat(points[points.length - 1][2]);
+        console.log(`[VCRIX] Found ${points.length} points in first series, last value: ${value}`);
+      }
+    }
+
+    if (!value) {
+      // Fallback : chercher le dernier point de toute la page avec timestamp 13 chiffres
+      const allPoints = [...html.matchAll(/\[(\d{13}),([\d.]+)\]/g)];
+      // Filtrer uniquement les valeurs plausibles pour le VCRIX (100-2000)
+      const vcrixPoints = allPoints.filter(m => {
+        const v = parseFloat(m[2]);
+        return v >= 100 && v <= 2000;
+      });
+      if (vcrixPoints.length > 0) {
+        value = parseFloat(vcrixPoints[vcrixPoints.length - 1][2]);
+        console.log(`[VCRIX] Fallback: found ${vcrixPoints.length} plausible points, last: ${value}`);
+      }
     }
 
     const avgMatch = html.match(/<b>Mean:<\/b>\s*([\d,]+\.?\d*)/);
