@@ -1,9 +1,10 @@
 {
   "name": "vcrix-scraper-api",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "main": "index.js",
   "dependencies": {
-    "express": "^4.18.0"
+    "express": "^4.18.0",
+    "puppeteer": "^21.0.0"
   },
   "scripts": {
     "start": "node index.js"
