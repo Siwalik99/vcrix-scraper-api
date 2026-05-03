@@ -17,7 +17,7 @@ function computeSignal(value, mean, std) {
   return 'NEUTRAL';
 }
 
-async function getPage(waitUntil = 'networkidle0') {
+async function getPage() {
   const browser = await puppeteer.launch({
     args: chromium.args,
     defaultViewport: chromium.defaultViewport,
@@ -30,7 +30,7 @@ async function getPage(waitUntil = 'networkidle0') {
     if (['image', 'font', 'media'].includes(req.resourceType())) req.abort();
     else req.continue();
   });
-  await page.goto('https://www.royalton-crix.com/getvcrix', { waitUntil, timeout: 40000 });
+  await page.goto('https://www.royalton-crix.com/getvcrix', { waitUntil: 'networkidle0', timeout: 40000 });
   await new Promise(r => setTimeout(r, 3000));
   const html = await page.content();
   await browser.close();
@@ -38,18 +38,18 @@ async function getPage(waitUntil = 'networkidle0') {
 }
 
 function extractValue(html) {
-  // Cibler la zone après le titre "Royalton CRIX Index" pour éviter les autres séries
-  const crixIdx = html.indexOf('Royalton CRIX Index');
-  const searchZone = crixIdx >= 0 ? html.slice(crixIdx, crixIdx + 50000) : html;
+  // Couper avant le treemap (qui contient aussi des données JSON parasites)
+  const treemapIdx = html.indexOf("type: 'treemap'");
+  const searchZone = treemapIdx > 0 ? html.slice(0, treemapIdx) : html;
 
   const points = [...searchZone.matchAll(/\[(\d{13}),([\d.]+)\]/g)];
   if (points.length > 0) {
     const val = parseFloat(points[points.length - 1][2]);
-    console.log(`[VCRIX] Found ${points.length} points after title, last=${val}`);
+    console.log(`[VCRIX] Found ${points.length} points (before treemap), last=${val}`);
     return val;
   }
 
-  console.warn('[VCRIX] No points found in HTML');
+  console.warn('[VCRIX] No points found');
   return null;
 }
 
@@ -59,7 +59,7 @@ async function scrapeVCRIX() {
     return { ...cache.data, cached: true };
   }
   try {
-    const html = await getPage('networkidle0');
+    const html = await getPage();
     const value = extractValue(html);
     const avgMatch = html.match(/<b>Mean:<\/b>\s*([\d,]+\.?\d*)/);
     const stdMatch = html.match(/<b>StD:<\/b>\s*([\d,]+\.?\d*)/);
@@ -85,16 +85,18 @@ app.get('/vcrix', async (req, res) => {
 
 app.get('/debug', async (req, res) => {
   try {
-    const html = await getPage('networkidle0');
-    const idx = html.indexOf('Royalton CRIX Index');
-    const excerpt = idx >= 0 ? html.slice(idx, idx + 600) : html.slice(0, 3000);
+    const html = await getPage();
+    const treemapIdx = html.indexOf("type: 'treemap'");
+    const searchZone = treemapIdx > 0 ? html.slice(0, treemapIdx) : html;
+    const points = [...searchZone.matchAll(/\[(\d{13}),([\d.]+)\]/g)];
+    const lastPoints = points.slice(-5).map(m => ({ ts: m[1], val: m[2] }));
     res.json({
-      length: html.length,
-      has_series: html.includes('series'),
-      has_vcrix: html.toLowerCase().includes('vcrix'),
-      crix_title_found: idx >= 0,
-      crix_excerpt: excerpt,
-      timestamp_count: (html.match(/\d{13}/g) || []).length
+      html_length: html.length,
+      treemap_found: treemapIdx > 0,
+      treemap_position: treemapIdx,
+      points_before_treemap: points.length,
+      last_5_points: lastPoints,
+      extracted_value: points.length > 0 ? parseFloat(points[points.length - 1][2]) : null
     });
   } catch (err) {
     res.json({ error: err.message });
